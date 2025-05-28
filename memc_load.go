@@ -25,7 +25,7 @@ import (
 )
 
 const normalErrRate = 0.01
-type appsInstalled struct {
+type AppsInstalled struct {
     devType string
     devID   string
     lat     float64
@@ -40,6 +40,33 @@ func dotRename(path string) error {
         return fmt.Errorf("renaming failed %s: %w", path, err)
     }
     return nil
+}
+
+func insertAppsInstalled(memcAddr string, appsInstalled AppsInstalled, dryRun bool) bool {
+    ua := appsInstalled.UserApps{
+        Lat:    appsInstalled.lat,
+        Lon:    appsInstalled.lon,
+        Apps:   appsInstalled.apps,
+    }
+
+    key := fmt.Sprintf("%s:%s", appsInstalled.devType, appsInstalled.devID)
+    packed, err := proto.Marshal(ua) // serializing to []byte
+	if err != nil {
+		log.Printf("Failed to serialize: %v", err)
+		return false
+	}
+
+    if dryRun {
+        log.Printf("%s - %s -> %s", memcAddr, key, ua.String())
+    } else {
+        memc := memcache.New(memcAddr)
+        err := memc.Set(&memcache.Item{Key: key, Value: packed})
+        if err != nil {
+            log.Printf("Cannot write to memc %s: %v", memcAddr, err)
+            return false
+        }
+    }
+    return true
 }
 
 // err := dotRename("logs/data.txt")
