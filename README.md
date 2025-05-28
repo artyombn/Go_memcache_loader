@@ -6,8 +6,10 @@ What's needed from Go learning to rewrite Python memc_loader to Go memc-loader:
 - ✅ funcs (step2.go)
 - ✅ Go structures (step3.go)
 - ✅ Errors handling (step4.go)
-- Protobuf Go
+- ✅ Protobuf Go
   - https://protobuf.dev/getting-started/gotutorial/
+- ✅ Loops patterns in Go (step5.go)
+  - https://go.dev/tour/flowcontrol/1
 
 
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
