@@ -69,6 +69,53 @@ func insertAppsInstalled(memcAddr string, appsInstalled AppsInstalled, dryRun bo
     return true
 }
 
+func parseAppsInstalled(line string) *AppsInstalled {
+// *AppsInstalled -> return structure pointer
+// AppsInstalled -> return structure itself
+    lineParts := strings.Split(strings.TrimSpace(line), "\t") // TrimSpace - remove spaces
+    if len(lineParts) < 5 {
+        return nil
+    }
+    devType := lineParts[0]
+    devId := lineParts[1]
+    Lat := lineParts[2]
+    Lon := lineParts[3]
+    rawApps := lineParts[4]
+
+    if devType == "" || devId == "" {
+        return nil
+    }
+
+    var apps []int32
+
+    rawAppItems := strings.Split(rawApps, ",")
+    for _, app := range rawAppItems {
+        app = strings.TrimSpace(app)
+        if app == "" {
+			continue
+		}
+        if id, err := strconv.Atoi(app); err == nil { // from str to int
+			apps = append(apps, int32(id))
+		} else {
+			log.Printf("Not all user apps are digits: `%s`", line)
+		}
+    }
+
+    Lat64, errLat := strconv.ParseFloat(Lat, 32) // always return float64
+    Lon64, errLon := strconv.ParseFloat(Lon, 32)
+    if errLat != nil || errLon != nil {
+		log.Printf("Invalid geo coords: `%s`", line)
+		return nil
+	}
+	return &AppsInstalled{
+		DevType: devType,
+		DevID:   devID,
+		Lat:     float32(Lat64),
+		Lon:     float32(Lon64),
+		Apps:    apps,
+	}
+}
+
 // err := dotRename("logs/data.txt")
 // if err != nil {
 //     log.Println("Something wrong with renaming:", err)
