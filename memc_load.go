@@ -18,10 +18,10 @@ import (
     "log"
     "flag"
     "fmt"
-    "io"
     "strings"
     "bufio"
     "strconv"
+    "time"
     "github.com/artyombn/Go_memcache_loader/appsinstalled"
     "github.com/bradfitz/gomemcache/memcache"
     "google.golang.org/protobuf/proto"
@@ -33,7 +33,7 @@ type AppsInstalled struct {
     DevID   string
     Lat     float64
     Lon     float64
-    Apps    []int
+    Apps    []uint32
 }
 
 func dotRename(path string) error {
@@ -46,10 +46,10 @@ func dotRename(path string) error {
 }
 
 func insertAppsInstalled(memcAddr string, appsInstalled AppsInstalled, dryRun bool) bool {
-    ua := &appsInstalled.UserApps{
-        Lat:    appsInstalled.lat,
-        Lon:    appsInstalled.lon,
-        Apps:   appsInstalled.apps,
+    ua := &appsinstalled.UserApps{
+        Lat:    proto.Float64(appsInstalled.Lat),
+        Lon:    proto.Float64(appsInstalled.Lon),
+        Apps:   appsInstalled.Apps,
     }
 
     key := fmt.Sprintf("%s:%s", appsInstalled.DevType, appsInstalled.DevID)
@@ -89,7 +89,7 @@ func parseAppsInstalled(line string) *AppsInstalled {
         return nil
     }
 
-    var apps []int32
+    var apps []uint32
 
     rawAppItems := strings.Split(rawApps, ",")
     for _, app := range rawAppItems {
@@ -97,15 +97,15 @@ func parseAppsInstalled(line string) *AppsInstalled {
         if app == "" {
 			continue
 		}
-        if id, err := strconv.Atoi(app); err == nil { // from str to int
-			apps = append(apps, int32(id))
+        if id, err := strconv.ParseUint(app, 10, 32); err == nil { // from str to int
+			apps = append(apps, uint32(id))
 		} else {
 			log.Printf("Not all user apps are digits: `%s`", line)
 		}
     }
 
-    lat64, errLat := strconv.ParseFloat(lat, 32) // always return float64
-    lon64, errLon := strconv.ParseFloat(lon, 32)
+    lat64, errLat := strconv.ParseFloat(lat, 64) // always return float64
+    lon64, errLon := strconv.ParseFloat(lon, 64)
     if errLat != nil || errLon != nil {
 		log.Printf("Invalid geo coords: `%s`", line)
 		return nil
@@ -113,8 +113,8 @@ func parseAppsInstalled(line string) *AppsInstalled {
 	return &AppsInstalled{
 		DevType: devType,
 		DevID:   devID,
-		Lat:     float32(lat64),
-		Lon:     float32(lon64),
+		Lat:     lat64,
+		Lon:     lon64,
 		Apps:    apps,
 	}
 }
@@ -126,8 +126,25 @@ func main() {
 	dvid := flag.String("dvid", "", "dvid memcached address")
 	pattern := flag.String("pattern", "./data/*.tsv.gz", "file pattern")
 	dryRun := flag.Bool("dry", false, "dry run mode")
+	logFile := flag.String("log", "", "log file path")
 
 	flag.Parse()
+
+	if *logFile != "" {
+		f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+		if err != nil {
+			log.Fatalf("Error opening log file: %v", err)
+		}
+		defer f.Close()
+		log.SetOutput(f)
+	}
+	if *dryRun {
+		log.SetPrefix("DEBUG ")
+	} else {
+		log.SetPrefix("INFO ")
+	}
+
+    log.Printf("Memc loader started with pattern: %s", *pattern)
 
     deviceMemc := map[string]string{
 		"idfa": *idfa,
@@ -141,7 +158,20 @@ func main() {
 		log.Fatalf("Failed to match pattern: %v", err)
 	}
 
-    for _, fn := range files {
+    var filteredFiles []string
+    for _, f := range files {
+        _, fn := filepath.Split(f)
+        if strings.HasPrefix(fn, ".") {
+            continue
+        }
+        filteredFiles = append(filteredFiles, f)
+    }
+
+    startTime := time.Now()
+    totalProcessed := 0
+    totalErrors := 0
+
+    for _, fn := range filteredFiles {
 		processed := 0
 		errors := 0
 		log.Printf("Processing %s", fn)
@@ -166,18 +196,18 @@ func main() {
 			if line == "" {
 				continue
 			}
-			appsinstalled := parseAppsInstalled(line)
-			if appsinstalled == nil {
+			parsed := parseAppsInstalled(line)
+			if parsed == nil {
 				errors++
 				continue
 			}
-			memcAddr, ok := deviceMemc[appsinstalled.DevType]
+			memcAddr, ok := deviceMemc[parsed.DevType]
 			if !ok {
 				errors++
-				log.Printf("Unknown device type: %s", appsinstalled.DevType)
+				log.Printf("Unknown device type: %s", parsed.DevType)
 				continue
 			}
-			ok = insertAppsInstalled(memcAddr, appsinstalled, *dryRun)
+			ok = insertAppsInstalled(memcAddr, *parsed, *dryRun)
 			if ok {
 				processed++
 			} else {
@@ -186,7 +216,7 @@ func main() {
 		}
 
 		if processed == 0 {
-			err := dotRename(fn)
+			err = dotRename(fn)
             if err != nil {
                 log.Printf("Something wrong with renaming: %s:%v", fn, err)
             }
@@ -200,9 +230,16 @@ func main() {
 			log.Printf("High error rate (%f > %f). Failed load", errRate, normalErrRate)
 		}
 
-        err := dotRename(fn)
+        err = dotRename(fn)
         if err != nil {
             log.Println("Something wrong with renaming: %s:%v", fn, err)
         }
+
+        totalProcessed += processed
+        totalErrors += errors
 	}
+
+    endTime := time.Now()
+    totalTime := endTime.Sub(startTime).Seconds()
+    log.Printf("Total processed: %d, total errors: %d, total execution time: %f sec", totalProcessed, totalErrors, totalTime)
 }

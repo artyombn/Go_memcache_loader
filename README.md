@@ -17,3 +17,8 @@ What's needed from Go learning to rewrite Python memc_loader to Go memc-loader:
 
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 protoc --go_out=. --go_opt=paths=source_relative appsinstalled/appsinstalled.proto
+
+### Run memcached via Docker
+docker run -d -p 11211:11211 --name test-memcached memcached
+### Run memc_load.go with logging
+go run memc_load.go --pattern "data/*.tsv.gz" --dry --log "logs/memc_load_single.log"
