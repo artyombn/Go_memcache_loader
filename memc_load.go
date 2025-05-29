@@ -20,17 +20,20 @@ import (
     "fmt"
     "io"
     "strings"
+    "bufio"
+    "strconv"
     "github.com/artyombn/Go_memcache_loader/appsinstalled"
     "github.com/bradfitz/gomemcache/memcache"
+    "google.golang.org/protobuf/proto"
 )
 
 const normalErrRate = 0.01
 type AppsInstalled struct {
-    devType string
-    devID   string
-    lat     float64
-    lon     float64
-    apps    []int
+    DevType string
+    DevID   string
+    Lat     float64
+    Lon     float64
+    Apps    []int
 }
 
 func dotRename(path string) error {
@@ -43,13 +46,13 @@ func dotRename(path string) error {
 }
 
 func insertAppsInstalled(memcAddr string, appsInstalled AppsInstalled, dryRun bool) bool {
-    ua := appsInstalled.UserApps{
+    ua := &appsInstalled.UserApps{
         Lat:    appsInstalled.lat,
         Lon:    appsInstalled.lon,
         Apps:   appsInstalled.apps,
     }
 
-    key := fmt.Sprintf("%s:%s", appsInstalled.devType, appsInstalled.devID)
+    key := fmt.Sprintf("%s:%s", appsInstalled.DevType, appsInstalled.DevID)
     packed, err := proto.Marshal(ua) // serializing to []byte
 	if err != nil {
 		log.Printf("Failed to serialize: %v", err)
@@ -77,12 +80,12 @@ func parseAppsInstalled(line string) *AppsInstalled {
         return nil
     }
     devType := lineParts[0]
-    devId := lineParts[1]
-    Lat := lineParts[2]
-    Lon := lineParts[3]
+    devID := lineParts[1]
+    lat := lineParts[2]
+    lon := lineParts[3]
     rawApps := lineParts[4]
 
-    if devType == "" || devId == "" {
+    if devType == "" || devID == "" {
         return nil
     }
 
@@ -101,8 +104,8 @@ func parseAppsInstalled(line string) *AppsInstalled {
 		}
     }
 
-    Lat64, errLat := strconv.ParseFloat(Lat, 32) // always return float64
-    Lon64, errLon := strconv.ParseFloat(Lon, 32)
+    lat64, errLat := strconv.ParseFloat(lat, 32) // always return float64
+    lon64, errLon := strconv.ParseFloat(lon, 32)
     if errLat != nil || errLon != nil {
 		log.Printf("Invalid geo coords: `%s`", line)
 		return nil
@@ -110,18 +113,96 @@ func parseAppsInstalled(line string) *AppsInstalled {
 	return &AppsInstalled{
 		DevType: devType,
 		DevID:   devID,
-		Lat:     float32(Lat64),
-		Lon:     float32(Lon64),
+		Lat:     float32(lat64),
+		Lon:     float32(lon64),
 		Apps:    apps,
 	}
 }
 
-// err := dotRename("logs/data.txt")
-// if err != nil {
-//     log.Println("Something wrong with renaming:", err)
-// }
-
-
 func main() {
-    fmt.Println("This is main func")
+    idfa := flag.String("idfa", "", "idfa memcached address")
+	gaid := flag.String("gaid", "", "gaid memcached address")
+	adid := flag.String("adid", "", "adid memcached address")
+	dvid := flag.String("dvid", "", "dvid memcached address")
+	pattern := flag.String("pattern", "./data/*.tsv.gz", "file pattern")
+	dryRun := flag.Bool("dry", false, "dry run mode")
+
+	flag.Parse()
+
+    deviceMemc := map[string]string{
+		"idfa": *idfa,
+		"gaid": *gaid,
+		"adid": *adid,
+		"dvid": *dvid,
+	}
+
+	files, err := filepath.Glob(*pattern)
+	if err != nil {
+		log.Fatalf("Failed to match pattern: %v", err)
+	}
+
+    for _, fn := range files {
+		processed := 0
+		errors := 0
+		log.Printf("Processing %s", fn)
+
+		fd, err := os.Open(fn)
+		if err != nil {
+			log.Printf("Can't open file %s:%v", fn, err)
+			continue
+		}
+		defer fd.Close() // defer - run before func return
+
+		gzReader, err := gzip.NewReader(fd)
+		if err != nil {
+			log.Printf("Can't create gzip reader %s:%v", fn, err)
+			continue
+		}
+		defer gzReader.Close()
+
+		scanner := bufio.NewScanner(gzReader) // scan each line via bufio
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			appsinstalled := parseAppsInstalled(line)
+			if appsinstalled == nil {
+				errors++
+				continue
+			}
+			memcAddr, ok := deviceMemc[appsinstalled.DevType]
+			if !ok {
+				errors++
+				log.Printf("Unknown device type: %s", appsinstalled.DevType)
+				continue
+			}
+			ok = insertAppsInstalled(memcAddr, appsinstalled, *dryRun)
+			if ok {
+				processed++
+			} else {
+				errors++
+			}
+		}
+
+		if processed == 0 {
+			err := dotRename(fn)
+            if err != nil {
+                log.Printf("Something wrong with renaming: %s:%v", fn, err)
+            }
+			continue
+		}
+
+		errRate := float64(errors) / float64(processed)
+		if errRate < normalErrRate {
+			log.Printf("Acceptable error rate (%f). Successful load", errRate)
+		} else {
+			log.Printf("High error rate (%f > %f). Failed load", errRate, normalErrRate)
+		}
+
+        err := dotRename(fn)
+        if err != nil {
+            log.Println("Something wrong with renaming: %s:%v", fn, err)
+        }
+	}
 }
