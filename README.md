@@ -10,8 +10,9 @@ What's needed from Go learning to rewrite Python memc_loader to Go memc-loader:
   - https://protobuf.dev/getting-started/gotutorial/
 - ✅ Loops patterns in Go (step5.go)
   - https://go.dev/tour/flowcontrol/1
-- ✅ Command-Line Flags in Go
+- ✅ Command-Line Flags in Go (step6.go)
   - https://gobyexample.com/command-line-flags
+- ✅ Goroutine (step7.go)
 
 
 
