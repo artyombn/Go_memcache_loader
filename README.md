@@ -1,5 +1,5 @@
 # Go MemcLoad
-### Rewrote Pyrhon memc_loader to Go memc_loader to process TSV logs and load them into memcached concurrently
+### Rewrote Python memc_loader to Go memc_loader to process TSV logs and load them into memcached concurrently
 
 What was learnt from Golang to rewrite Python memc_loader to Go memc_loader:
 - ✅ modules / packages / building
